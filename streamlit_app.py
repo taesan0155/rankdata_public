@@ -150,11 +150,21 @@ def load_config():
     return {}
 
 def save_config(cfg: dict):
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 세션 상태에도 백업하여 즉시 반영 보장
+    for k, v in cfg.items():
+        st.session_state[f"cfg_{k}"] = v
+    try:
+        CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        return True, ""
+    except Exception as e:
+        return False, str(e)
 
 _local_cfg = load_config()
 
 def get_secret(key, default=""):
+    session_key = f"cfg_{key}"
+    if session_key in st.session_state and st.session_state[session_key] is not None:
+        return st.session_state[session_key]
     try:
         val = st.secrets.get(key, None)
         if val is not None:
@@ -232,8 +242,12 @@ if not _is_configured and not st.session_state.get("_skip_onboarding"):
                 "WORKS_BOT_ID": ob_works_bot,
                 "WORKS_ROOM_ID": ob_works_room,
             }
-            save_config(cfg)
-            st.success("설정이 저장되었습니다! 앱을 재시작합니다...")
+            ok, err_msg = save_config(cfg)
+            if ok:
+                st.success("설정이 파일에 성공적으로 저장되었습니다! 앱을 재시작합니다...")
+            else:
+                st.warning(f"⚠️ 설정이 세션에는 임시 저장되었으나, 파일 쓰기에 실패했습니다 (배포 환경 제한 등). 에러: {err_msg}")
+            time.sleep(1.5)
             st.rerun()
 
     if st.button("나중에 설정 (지금은 건너뛰기)", type="secondary"):
@@ -250,24 +264,44 @@ def get_vol(kw, ak, sk, cid):
         headers = {**HTTP_HEADERS, "X-Timestamp": ts, "X-API-KEY": ak, "X-Customer": cid, "X-Signature": sig}
         time.sleep(random.uniform(1.2, 2.5)) 
         res = requests.get(f"https://api.naver.com/keywordstool?hintKeywords={kw.replace(' ', '')}&showDetail=1", headers=headers, timeout=10)
+        if res.status_code == 401:
+            st.error("🚨 [네이버 광고 API] 401 Unauthorized - Ad API Key, Secret 또는 Customer ID가 올바르지 않습니다.")
+            return 0, 0, 0
+        elif res.status_code == 429:
+            st.error("🚨 [네이버 광고 API] 429 Too Many Requests - 호출 한도를 초과했습니다.")
+            return 0, 0, 0
         res.raise_for_status()
         for i in res.json().get('keywordList', []):
             if i['relKeyword'].replace(" ", "") == kw.replace(" ", ""):
                 v = int(str(i['monthlyPcQcCnt']).replace("<", "")) + int(str(i['monthlyMobileQcCnt']).replace("<", ""))
                 c = float(str(i['monthlyAvePcClkCnt']).replace("<", "")) + float(str(i['monthlyAveMobileClkCnt']).replace("<", ""))
                 return v, round(c, 1), round(c / v * 100, 2) if v else 0
-    except: pass
+    except Exception as e:
+        st.warning(f"⚠️ [네이버 광고 API] '{kw}' 검색량 조회 실패: {str(e)}")
     return 0, 0, 0
 
 def get_rank(kw, cid, sec):
-    if not (cid and sec): return []
+    if not (cid and sec): 
+        st.error("🚨 [네이버 검색 API] Client ID 또는 Client Secret 설정이 누락되었습니다.")
+        return []
     try:
         headers = {**HTTP_HEADERS, "X-Naver-Client-Id": cid, "X-Naver-Client-Secret": sec}
         time.sleep(random.uniform(0.8, 1.5))
         res = requests.get("https://openapi.naver.com/v1/search/shop.json", headers=headers, params={"query": kw, "display": 100, "sort": "sim"}, timeout=10)
+        if res.status_code == 401:
+            st.error("🚨 [네이버 검색 API] 401 Unauthorized - Client ID 또는 Secret이 올바르지 않습니다.")
+            return []
+        elif res.status_code == 403:
+            st.error("🚨 [네이버 검색 API] 403 Forbidden - API 사용 권한 또는 일일 호출 한도 초과 여부를 확인하세요.")
+            return []
+        elif res.status_code == 429:
+            st.error("🚨 [네이버 검색 API] 429 Too Many Requests - 일일 호출 한도(25,000회)를 초과했습니다.")
+            return []
         res.raise_for_status()
         return res.json().get('items', [])
-    except: return []
+    except Exception as e:
+        st.error(f"🚨 [네이버 검색 API] '{kw}' 순위 조회 중 예외 발생: {str(e)}")
+        return []
 
 # --- GAS 연동 (POST/GET) ---
 def send_to_gas(df, url, token):
@@ -441,9 +475,12 @@ with st.sidebar:
                 "WORKS_BOT_ID": works_bot_id,
                 "WORKS_ROOM_ID": works_room_id,
             }
-            save_config(cfg)
-            st.success("설정이 저장되었습니다! 앱을 새로고침합니다...")
-            time.sleep(1)
+            ok, err_msg = save_config(cfg)
+            if ok:
+                st.success("설정이 파일에 성공적으로 저장되었습니다! 앱을 새로고침합니다...")
+            else:
+                st.warning(f"⚠️ 설정이 세션에는 임시 저장되었으나, 파일 쓰기에 실패했습니다 (배포 환경 제한 등). 에러: {err_msg}")
+            time.sleep(1.5)
             st.rerun()
 
 # --- 브랜드 레이블 도출 (UI 표시용) ---
@@ -1171,9 +1208,10 @@ elif selected_menu == "Run & Sync":
             status = st.empty()
             results, ai_raw = [], ""
             
-            t_db = [x.strip() for x in my_brand_1.split(',')]
-            t_bit = [x.strip() for x in my_brand_2.split(',')]
-            t_comp = [x.strip() for x in competitors.split(',')]
+            # 빈 문자열이나 공백만 있는 설정을 걸러내도록 수정하여 버그 차단
+            t_db = [x.strip() for x in my_brand_1.split(',') if x.strip()]
+            t_bit = [x.strip() for x in my_brand_2.split(',') if x.strip()]
+            t_comp = [x.strip() for x in competitors.split(',') if x.strip()]
 
             for i, kw in enumerate(keywords):
                 status.text(f"🔍 수집 중... ({i+1}/{len(keywords)}) : {kw}")
@@ -1183,29 +1221,34 @@ elif selected_menu == "Run & Sync":
                 items = get_rank(kw, naver_cid, naver_csec)
                 
                 r_db = r_bit = 999
-                top_mall = items[0]['mallName'] if items else "-"
                 
                 if items:
                     for r, item in enumerate(items, 1):
                         mn = item['mallName'].replace(" ", "").lower()
-                        if any(x.lower().replace(" ","") in mn for x in t_db): r_db = min(r_db, r)
-                        if any(x.lower().replace(" ","") in mn for x in t_bit): r_bit = min(r_bit, r)
+                        if t_db and any(x.lower().replace(" ","") in mn for x in t_db): r_db = min(r_db, r)
+                        if t_bit and any(x.lower().replace(" ","") in mn for x in t_bit): r_bit = min(r_bit, r)
                         
-                        if r <= 3 or any(x.lower().replace(" ","") in mn for x in t_db + t_bit + t_comp):
+                        # 필터 대상: 1~3위 제품이거나, 자사/경쟁사 매칭 브랜드 제품인 경우
+                        is_target = r <= 3
+                        if t_db and any(x.lower().replace(" ","") in mn for x in t_db): is_target = True
+                        if t_bit and any(x.lower().replace(" ","") in mn for x in t_bit): is_target = True
+                        if t_comp and any(x.lower().replace(" ","") in mn for x in t_comp): is_target = True
+                        
+                        if is_target:
                             standard_mall = item['mallName']
 
                             # 경쟁사 플래그 동적 생성
                             _comp_flags = {
-                                f"is_comp_{i+1}": comp.lower().replace(" ", "") in mn
-                                for i, comp in enumerate(t_comp)
+                                f"is_comp_{idx+1}": comp.lower().replace(" ", "") in mn
+                                for idx, comp in enumerate(t_comp)
                             }
 
                             results.append({
                                 "date": TODAY_ISO, "keyword": kw, "vol": vol, "click": clk, "ctr": ctr,
                                 "rank": r, "mall": standard_mall, "title": item['title'].replace("<b>","").replace("</b>",""),
                                 "price": item['lprice'], "link": item['link'],
-                                "is_db": any(x.lower().replace(" ", "") in mn for x in t_db),
-                                "is_bit": any(x.lower().replace(" ", "") in mn for x in t_bit),
+                                "is_db": bool(t_db and any(x.lower().replace(" ", "") in mn for x in t_db)),
+                                "is_bit": bool(t_bit and any(x.lower().replace(" ", "") in mn for x in t_bit)),
                                 **_comp_flags
                             })
                 
@@ -1215,11 +1258,21 @@ elif selected_menu == "Run & Sync":
 
             df = pd.DataFrame(results)
             st.session_state.crawled_df = df
-            status.text("📤 구글 시트로 전송 중 (최대 120초 소요)...")
             
-            success, msg = send_to_gas(df, apps_script_url, apps_script_token)
-            if success: st.toast("✅ 전송 완료!"); status.empty()
-            else: st.error(f"전송 실패: {msg}")
+            # 수집된 데이터가 0건일 경우 전송을 차단
+            if df.empty:
+                st.warning("⚠️ 지정하신 브랜드명 또는 1~3위 내의 크롤링 데이터가 0건입니다. 네이버 API가 정상적으로 작동 중인지, 브랜드명(태산스토어 등) 철자가 일치하는지 확인해 주세요.")
+                status.empty()
+            else:
+                status.text("📤 구글 시트로 전송 중 (최대 120초 소요)...")
+                success, msg = send_to_gas(df, apps_script_url, apps_script_token)
+                if success: 
+                    st.toast("✅ 전송 완료!")
+                    st.success(f"구글 시트로 {len(df)}행의 순위 데이터를 성공적으로 연동했습니다!")
+                    status.empty()
+                else: 
+                    st.error(f"전송 실패: {msg}")
+                    status.empty()
 
             if gemini_key:
                 status.text("🤖 실무자 맞춤형 AI 리포트 생성 중...")
