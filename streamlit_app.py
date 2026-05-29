@@ -279,7 +279,10 @@ def send_to_gas(df, url, token):
         headers = {'Content-Type': 'text/plain; charset=utf-8'}
         res = requests.post(url, params={"token": token, "type": "auto_daily"}, data=csv_bytes, headers=headers, timeout=120)
         res.raise_for_status()
-        return True, "성공"
+        resp_text = res.text.strip()
+        if "Error" in resp_text or resp_text.startswith("Error"):
+            return False, f"GAS 서버 응답 에러: {resp_text}"
+        return True, f"성공 ({resp_text})"
     except requests.exceptions.ReadTimeout:
         return True, "성공 (지연 처리 중)"
     except Exception as e:
