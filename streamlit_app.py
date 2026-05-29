@@ -420,6 +420,31 @@ with st.sidebar:
         works_pkey = st.text_area("Works Private Key", value=get_secret("WORKS_PRIVATE_KEY"), height=100)
         works_bot_id = st.text_input("Works Bot ID", value=get_secret("WORKS_BOT_ID"))
         works_room_id = st.text_input("Works Room ID", value=get_secret("WORKS_ROOM_ID"))
+        
+        if st.button("💾 설정 영구 저장", type="primary", use_container_width=True):
+            cfg = {
+                "NAVER_CLIENT_ID": naver_cid,
+                "NAVER_CLIENT_SECRET": naver_csec,
+                "NAVER_AD_API_KEY": ad_api_key,
+                "NAVER_AD_SECRET_KEY": ad_sec_key,
+                "NAVER_CUSTOMER_ID": ad_cus_id,
+                "MY_BRAND_1": my_brand_1,
+                "MY_BRAND_2": my_brand_2,
+                "COMPETITORS": competitors,
+                "APPS_SCRIPT_URL": apps_script_url,
+                "APPS_SCRIPT_TOKEN": apps_script_token,
+                "GEMINI_API_KEY": gemini_key,
+                "WORKS_CLIENT_ID": works_cid,
+                "WORKS_CLIENT_SECRET": works_csec,
+                "WORKS_SERVICE_ACCOUNT": works_sa,
+                "WORKS_PRIVATE_KEY": works_pkey,
+                "WORKS_BOT_ID": works_bot_id,
+                "WORKS_ROOM_ID": works_room_id,
+            }
+            save_config(cfg)
+            st.success("설정이 저장되었습니다! 앱을 새로고침합니다...")
+            time.sleep(1)
+            st.rerun()
 
 # --- 브랜드 레이블 도출 (UI 표시용) ---
 _t_db_list = [x.strip() for x in my_brand_1.split(',') if x.strip()]
