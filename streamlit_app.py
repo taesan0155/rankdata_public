@@ -483,6 +483,19 @@ with st.sidebar:
             time.sleep(1.5)
             st.rerun()
 
+        st.divider()
+        st.markdown("**🔍 현재 적용된 API 설정 상태**")
+        def mask_val(val):
+            if not val: return "❌ 설정 미완료"
+            val = str(val).strip()
+            if len(val) <= 6: return f"{val[:2]}*** (총 {len(val)}자)"
+            return f"{val[:3]}***{val[-3:]} (총 {len(val)}자)"
+        
+        st.caption(f"• **Naver ID**: {mask_val(get_secret('NAVER_CLIENT_ID'))}")
+        st.caption(f"• **Naver Secret**: {mask_val(get_secret('NAVER_CLIENT_SECRET'))}")
+        st.caption(f"• **Ad API Key**: {mask_val(get_secret('NAVER_AD_API_KEY'))}")
+        st.caption(f"• **GAS URL**: {mask_val(get_secret('APPS_SCRIPT_URL'))}")
+
 # --- 브랜드 레이블 도출 (UI 표시용) ---
 _t_db_list = [x.strip() for x in my_brand_1.split(',') if x.strip()]
 _t_bit_list = [x.strip() for x in my_brand_2.split(',') if x.strip()]
