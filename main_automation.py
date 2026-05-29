@@ -229,19 +229,26 @@ def run_automation():
             row.update(comp_flags)
             results.append(row)
 
-    if results and APPS_SCRIPT_URL:
+    if not results:
+        logging.warning("No matched products or rank 1-3 found. Skipping GAS upload and notification.")
+    elif APPS_SCRIPT_URL:
         import pandas as pd, io as _io
         df = pd.DataFrame(results)
         csv_bytes = df.to_csv(index=False).encode('utf-8')
         try:
-            requests.post(
+            res = requests.post(
                 APPS_SCRIPT_URL,
                 params={"token": APPS_SCRIPT_TOKEN, "type": "auto_daily"},
                 data=csv_bytes,
                 headers={"Content-Type": "text/plain; charset=utf-8"},
                 timeout=30
             )
-            logging.info("GAS upload complete")
+            res.raise_for_status()
+            resp_text = res.text.strip()
+            if "Error" in resp_text or resp_text.startswith("Error"):
+                logging.error("GAS upload failed with response error: %s", resp_text)
+            else:
+                logging.info("GAS upload complete: %s", resp_text)
         except Exception as e:
             logging.error("GAS upload failed: %s", e)
 
