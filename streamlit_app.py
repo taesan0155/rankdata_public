@@ -327,8 +327,18 @@ def fetch_history_from_gas(url):
     try:
         res = requests.get(url, timeout=120)
         res.raise_for_status()
-        df = pd.DataFrame(res.json())
+        resp_data = res.json()
+        
+        # 만약 GAS 단에서 반환한 JSON에 에러가 있다면
+        if isinstance(resp_data, dict) and "error" in resp_data:
+            return pd.DataFrame(), f"GAS 실행 에러: {resp_data['error']}"
+            
+        df = pd.DataFrame(resp_data)
         if not df.empty:
+            # 필수 컬럼(date)이 누락된 경우 비어있는 데이터프레임으로 변환
+            if 'date' not in df.columns:
+                return pd.DataFrame(), "구글 시트 데이터에 필수 열('date')이 존재하지 않습니다."
+                
             if 'date' in df.columns: 
                 df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
             if 'rank' in df.columns: 
@@ -543,7 +553,13 @@ if st.session_state.history_df.empty and apps_script_url:
 # 모든 메뉴에서 공통으로 사용할 정제된 데이터프레임 사전 생성
 hist_df = get_clean_df(st.session_state.history_df)
 crawled_df = get_clean_df(st.session_state.crawled_df)
-metric_df = crawled_df.copy() if not crawled_df.empty else (hist_df[hist_df['date'] == hist_df['date'].max()] if not hist_df.empty else pd.DataFrame())
+
+# 'date' 컬럼 존재 여부를 검사하여 KeyError 크래시 방지
+metric_df = pd.DataFrame()
+if not crawled_df.empty and 'date' in crawled_df.columns:
+    metric_df = crawled_df.copy()
+elif not hist_df.empty and 'date' in hist_df.columns:
+    metric_df = hist_df[hist_df['date'] == hist_df['date'].max()]
 
 # --- 1. Dashboard ---
 if selected_menu == "Dashboard":
@@ -556,7 +572,10 @@ if selected_menu == "Dashboard":
                 st.session_state.history_df = df
                 # 동기화 직후 hist_df 강제 갱신
                 hist_df = get_clean_df(st.session_state.history_df)
-                metric_df = hist_df[hist_df['date'] == hist_df['date'].max()] if not hist_df.empty else pd.DataFrame()
+                if not hist_df.empty and 'date' in hist_df.columns:
+                    metric_df = hist_df[hist_df['date'] == hist_df['date'].max()]
+                else:
+                    metric_df = pd.DataFrame()
                 st.success("데이터 새로고침 완료! 최신 순위가 반영되었습니다.")
             else: st.error(f"동기화 실패: {err}")
     
